@@ -5,7 +5,7 @@ from pathlib import Path
 from torchvision import datasets, transforms
 import multiprocessing
 
-from .helpers import compute_mean_and_std, get_data_location
+from src.helpers import compute_mean_and_std, get_data_location
 import matplotlib.pyplot as plt
 
 
@@ -46,14 +46,33 @@ def get_data_loaders(
     # HINT: resize the image to 256 first, then crop them to 224, then add the
     # appropriate transforms for that step
     data_transforms = {
-        "train": transforms.Compose(
-            # YOUR CODE HERE
-        ),
+        "train": transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomCrop(224, padding_mode="reflect", pad_if_needed=True),  # -
+            transforms.RandomAffine(scale=(0.9, 1.1), translate=(0.1, 0.1), degrees=10),
+            # Color modifications. Here I exaggerate to show the effect
+            transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
+            # Apply an horizontal flip with 50% probability (i.e., if you pass
+            # 100 images through around half of them will undergo the flipping)
+            transforms.RandomHorizontalFlip(0.5),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]),
         "valid": transforms.Compose(
-            # YOUR CODE HERE
+            [
+                transforms.Resize(256),
+                transforms.RandomCrop(224, padding_mode="reflect", pad_if_needed=True),  # -
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]
         ),
         "test": transforms.Compose(
-            # YOUR CODE HERE
+            [
+                transforms.Resize(256),
+                transforms.RandomCrop(224, padding_mode="reflect", pad_if_needed=True),  # -
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]
         ),
     }
 
@@ -62,6 +81,7 @@ def get_data_loaders(
         base_path / "train",
         # YOUR CODE HERE: add the appropriate transform that you defined in
         # the data_transforms dictionary
+        transform=data_transforms['train']
     )
     # The validation dataset is a split from the train_one_epoch dataset, so we read
     # from the same folder, but we apply the transforms for validation
@@ -69,6 +89,7 @@ def get_data_loaders(
         base_path / "train",
         # YOUR CODE HERE: add the appropriate transform that you defined in
         # the data_transforms dictionary
+        transform=data_transforms['valid']
     )
 
     # obtain training indices that will be used for validation
@@ -85,7 +106,7 @@ def get_data_loaders(
 
     # define samplers for obtaining training and validation batches
     train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
-    valid_sampler  = # YOUR CODE HERE
+    valid_sampler  = torch.utils.data.SubsetRandomSampler(valid_idx)
 
     # prepare data loaders
     data_loaders["train"] = torch.utils.data.DataLoader(
@@ -95,13 +116,16 @@ def get_data_loaders(
         num_workers=num_workers,
     )
     data_loaders["valid"] = torch.utils.data.DataLoader(
-        # YOUR CODE HERE
+        valid_data,
+        batch_size=batch_size,
+        sampler=valid_sampler,
+        num_workers=num_workers,
     )
 
     # Now create the test data loader
     test_data = datasets.ImageFolder(
         base_path / "test",
-        # YOUR CODE HERE (add the test transform)
+        transform=  data_transforms['test']
     )
 
     if limit > 0:
@@ -112,6 +136,12 @@ def get_data_loaders(
 
     data_loaders["test"] = torch.utils.data.DataLoader(
         # YOUR CODE HERE (remember to add shuffle=False as well)
+        test_data,
+        batch_size=batch_size,
+        sampler=test_sampler,
+        num_workers=num_workers,
+        shuffle=False
+
     )
 
     return data_loaders
@@ -126,13 +156,8 @@ def visualize_one_batch(data_loaders, max_n: int = 5):
     :return: None
     """
 
-    # YOUR CODE HERE:
     # obtain one batch of training images
-    # First obtain an iterator from the train dataloader
-    dataiter  = # YOUR CODE HERE
-    # Then call the .next() method on the iterator you just
-    # obtained
-    images, labels  = # YOUR CODE HERE
+    images, labels = next(iter(data_loaders["train"]))
 
     # Undo the normalization (for visualization purposes)
     mean, std = compute_mean_and_std()
@@ -145,13 +170,11 @@ def visualize_one_batch(data_loaders, max_n: int = 5):
 
     images = invTrans(images)
 
-    # YOUR CODE HERE:
     # Get class names from the train data loader
-    class_names  = # YOUR CODE HERE
+    class_names = data_loaders["train"].dataset.classes
 
-    # Convert from BGR (the format used by pytorch) to
-    # RGB (the format expected by matplotlib)
-    images = torch.permute(images, (0, 2, 3, 1)).clip(0, 1)
+    # Convert from BGR (the format used by pytorch) to RGB (the format expected by matplotlib)
+    images = images.permute(0, 2, 3, 1).clip(0, 1)
 
     # plot the images in the batch, along with the corresponding labels
     fig = plt.figure(figsize=(25, 4))
@@ -159,7 +182,6 @@ def visualize_one_batch(data_loaders, max_n: int = 5):
         ax = fig.add_subplot(1, max_n, idx + 1, xticks=[], yticks=[])
         ax.imshow(images[idx])
         # print out the correct label for each image
-        # .item() gets the value contained in a Tensor
         ax.set_title(class_names[labels[idx].item()])
 
 
@@ -181,8 +203,7 @@ def test_data_loaders_keys(data_loaders):
 
 def test_data_loaders_output_type(data_loaders):
     # Test the data loaders
-    dataiter = iter(data_loaders["train"])
-    images, labels = dataiter.next()
+    images, labels  = next(iter(data_loaders["train"]))
 
     assert isinstance(images, torch.Tensor), "images should be a Tensor"
     assert isinstance(labels, torch.Tensor), "labels should be a Tensor"
@@ -191,8 +212,8 @@ def test_data_loaders_output_type(data_loaders):
 
 
 def test_data_loaders_output_shape(data_loaders):
-    dataiter = iter(data_loaders["train"])
-    images, labels = dataiter.next()
+    images, labels  = next(iter(data_loaders["train"]))
+
 
     assert len(images) == 2, f"Expected a batch of size 2, got size {len(images)}"
     assert (
